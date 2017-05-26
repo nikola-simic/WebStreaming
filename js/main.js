@@ -20,6 +20,8 @@ var remoteAudioStream;
 var localEndpoint;
 
 var connectionInitiator = false;
+var remoteSideReady = false;
+var shouldSendOffer = false;
 
 // Handling events from signalling server
 function onCreated(room) {
@@ -31,14 +33,24 @@ function onJoined(room) {
 	console.log('Client has joined to room: ' + room);
 }
 
+function onPeerReady(msg) {
+	console.log('Remote peer is ready to start communication');
+	remoteSideReady = true;
+	if(connectionInitiator && shouldSendOffer) {
+		// Creating sdp offer
+		var offerDescription = {offerToreceiveVideo: 1};
+		localEndpoint.createOffer(offerDescription).then(onOfferCreated);
+	}
+}
+
 function onStart(msg) {
 	console.log(msg);
 	startCall();
 }
 
 function onBye() {
-	console.log('Peer has close socket');
-	alert('Peer has ended this call');
+	console.log('Remote peer has close socket');
+	alert('Remote peer has ended this call');
 }
 
 function onMessage(msg) {
@@ -87,6 +99,7 @@ function onStartButtonClicked() {
 	socket = io();
 	socket.on('created', onCreated);
 	socket.on('joined', onJoined);
+	socket.on('peerReady', onPeerReady);
 	socket.on('start', onStart);
 	socket.on('bye', onBye);
 	socket.on('message', onMessage);
@@ -137,10 +150,17 @@ function createConnection() {
 	localEndpoint.addStream(localStream);
 	localEndpoint.ontrack = onTrackAdded;
 
-	// Creating sdp offer
+	// Signalling to other side that peer is ready to start negotiation
+	socket.emit('peerReady');
+
 	if(connectionInitiator) {
-		var offerDescription = {offerToreceiveVideo: 1};
-		localEndpoint.createOffer(offerDescription).then(onOfferCreated);
+		if(!remoteSideReady) {
+			shouldSendOffer = true;
+		} else {
+			// Creating sdp offer
+			var offerDescription = {offerToreceiveVideo: 1};
+			localEndpoint.createOffer(offerDescription).then(onOfferCreated);
+		}
 	}
 	
 }
@@ -162,14 +182,14 @@ function onOfferCreated(description) {
 	// Setting description to local endpoint
 	localEndpoint.setLocalDescription(description).then(function(){
 		console.log('setLocalDescription success');
+		// Signalling description to remote endpoint
+		var message = {type: 'offer', offer: description};
+		sendMessage(message);
+
 	},
 	function(e) {
 		console.error('setLocalDescription error: ', e);
 	});
-
-	// Signalling description to remote endpoint
-	var message = {type: 'offer', offer: description};
-	sendMessage(message);
 
 }
 
@@ -177,12 +197,13 @@ function onAnswerCreated(description) {
 	
 	localEndpoint.setLocalDescription(description).then(function() {
 		console.log('setLocalDescription success');
+		var message = {type: 'answer', answer: description};
+		sendMessage(message);
 	},
 	function(e) {
 		console.error('setLocalDescription error: ', e);
 	});
-	var message = {type: 'answer', answer: description};
-	sendMessage(message);
+	
 
 }
 
@@ -199,6 +220,9 @@ function stopCall() {
 	localStream.getAudioTracks()[0].stop();
 	localEndpoint.close();
 	localEndpoint = null;
+	connectionInitiator = false;
+	remoteSideReady = false;
+	shouldSendOffer = false;
 	socket.close();
 	startButton.disabled = false;
 	stopButton.disabled = true;

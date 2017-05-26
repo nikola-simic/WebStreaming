@@ -49,6 +49,12 @@ io.on('connect', function(socket) {
 		}
 	});
 
+	// Handling client ready
+	socket.on('peerReady', function() {
+		console.log('clientReady event received');
+		socket.broadcast.emit('peerReady');
+	});
+
 	// Handling client leaving the room
 	socket.on('disconnect', function() {
 		console.log('disconnect event received');
